@@ -1,0 +1,93 @@
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import re
+import string
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+
+# Download necessary NLTK data (run once)
+nltk.download('punkt')
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+class SimpleChatbot:
+    def __init__(self, df):
+        self.df = df
+        self.vectorizer = TfidfVectorizer()
+        self.question_vectors = self._train_vectorizer()
+        self.lemmatizer = WordNetLemmatizer()
+        self.stopwords = set(stopwords.words('english'))
+
+    def _preprocess_text(self, text):
+        text = text.lower()
+        text = re.sub(f'[{re.escape(string.punctuation)}]', '', text) # Remove punctuation
+        words = nltk.word_tokenize(text)
+        words = [self.lemmatizer.lemmatize(word) for word in words if word not in self.stopwords]
+        return ' '.join(words)
+
+    def _train_vectorizer(self):
+        # Preprocess all questions in the dataframe
+        self.df['processed_question'] = self.df['questions'].apply(self._preprocess_text)
+        # Fit and transform the processed questions
+        return self.vectorizer.fit_transform(self.df['processed_question'])
+
+    def get_answer(self, user_question, similarity_threshold=0.7):
+        processed_user_question = self._preprocess_text(user_question)
+
+        # Handle empty processed questions (e.g., if user only types stop words)
+        if not processed_user_question.strip():
+            return "I'm sorry, I don't understand that question. Could you please rephrase it?"
+
+        user_question_vector = self.vectorizer.transform([processed_user_question])
+        similarities = cosine_similarity(user_question_vector, self.question_vectors).flatten()
+
+        max_similarity = similarities.max()
+        if max_similarity >= similarity_threshold:
+            best_match_index = similarities.argmax()
+            return self.df.loc[best_match_index, 'answer']
+        else:
+            return "I'm sorry, I don't have an answer for that specific question. Could you try asking it differently?"
+
+# --- Example Usage ---
+# 1. Create your DataFrame
+data = {
+    'questions': [
+        "What is your refund policy?",
+        "How can I return an item?",
+        "Do you offer international shipping?",
+        "What are your shipping costs?",
+        "How do I track my order?",
+        "When will my order arrive?",
+        "Can I change my delivery address?",
+        "What payment methods do you accept?",
+        "Is there a warranty on your products?",
+        "How do I contact customer support?"
+    ],
+    'answer': [
+        "Our refund policy allows returns within 30 days of purchase.",
+        "To return an item, please visit our returns portal on our website.",
+        "Yes, we offer international shipping to most countries.",
+        "Shipping costs vary by destination and shipping speed. Please see our shipping page.",
+        "You can track your order using the tracking number provided in your shipping confirmation email.",
+        "Orders typically arrive within 5-7 business days for standard shipping.",
+        "Please contact customer support immediately to change your delivery address.",
+        "We accept Visa, MasterCard, American Express, and PayPal.",
+        "Yes, all our products come with a one-year warranty.",
+        "You can contact customer support via email at support@example.com or call us at 1-800-123-4567."
+    ]
+}
+df = pd.DataFrame(data)
+
+# 2. Initialize the chatbot
+chatbot = SimpleChatbot(df)
+
+# 3. Interact with the chatbot
+print(chatbot.get_answer("What is the return policy?"))
+print(chatbot.get_answer("I want to send something back. How?", similarity_threshold=0.6)) # Lower threshold for more flexibility
+print(chatbot.get_answer("Do you ship overseas?"))
+print(chatbot.get_answer("Tell me about your product guarantee."))
+print(chatbot.get_answer("How do I get in touch with you?", similarity_threshold=0.8))
+print(chatbot.get_answer("What's the weather like today?")) # Should return "no answer"
+print(chatbot.get_answer("???!!!")) # Should return "no answer" due to empty processed question
